@@ -287,7 +287,7 @@ DESC
 
   def write(chunk)
     tag = chunk.key
-    def_topic = @default_topic || tag
+    def_topic = Time.now.strftime(@default_topic) || tag
     producer = get_producer
 
     records_by_topic = {}

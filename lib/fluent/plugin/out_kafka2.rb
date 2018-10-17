@@ -58,9 +58,6 @@ Add a regular expression to capture ActiveSupport notifications from the Kafka c
 requires activesupport gem - records will be generated under fluent_kafka_stats.**
 DESC
 
-    config_section :buffer do
-      config_set_default :chunk_keys, ["topic"]
-    end
     config_section :format do
       config_set_default :@type, 'json'
     end
@@ -122,16 +119,6 @@ DESC
       end
       @formatter_proc = setup_formatter(formatter_conf)
 
-      if @default_topic.nil?
-        if @chunk_keys.include?('topic') && !@chunk_key_tag
-          log.warn "Use 'topic' field of event record for topic but no fallback. Recommend to set default_topic or set 'tag' in buffer chunk keys like <buffer topic,tag>"
-        end
-      else
-        if @chunk_key_tag
-          log.warn "default_topic is set. Fluentd's event tag is not used for topic"
-        end
-      end
-
       @producer_opts = {max_retries: @max_send_retries, required_acks: @required_acks}
       @producer_opts[:ack_timeout] = @ack_timeout if @ack_timeout
       @producer_opts[:compression_codec] = @compression_codec.to_sym if @compression_codec
@@ -191,8 +178,13 @@ DESC
     # TODO: optimize write performance
     def write(chunk)
       tag = chunk.metadata.tag
-      topic = chunk.metadata.variables[@topic_key_sym] || @default_topic || tag
-      producer = @kafka.topic_producer(topic, @producer_opts)
+      meta_vars = chunk.metadata.variables
+      unless meta_vars.nil?
+        topic = meta_vars[@topic_key_sym]
+      end
+      topic ||= @default_topic || tag
+      topc = Time.now.strftime(topic)
+      producer = @kafka.producer(@producer_opts)
 
       messages = 0
       record_buf = nil
@@ -215,7 +207,8 @@ DESC
           log.trace { "message will send to #{topic} with partition_key: #{partition_key}, partition: #{partition}, message_key: #{message_key} and value: #{record_buf}." }
           messages += 1
 
-          producer.produce(record_buf, message_key, partition, partition_key)
+          produce_opts = { key: message_key, topic: topic, partition: partition, partition_key: partition_key }
+          producer.produce(record_buf, produce_opts)
         }
 
         if messages > 0
